@@ -2,79 +2,74 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/diamondburned/arikawa/v3/api"
-	"github.com/diamondburned/arikawa/v3/discord"
-	"github.com/diamondburned/arikawa/v3/state"
+	"github.com/bwmarrin/discordgo"
 )
 
 // File for handling the Discord's CommandData shit
 
-var RollCommandData = api.CreateCommandData{
+var RollCommandData = discordgo.ApplicationCommand{
 	Name:        "roll",
 	Description: "Use up one token to roll a card",
 }
 
-var Commands = []api.CreateCommandData{
-	RollCommandData,
+var AddCommandData = discordgo.ApplicationCommand{
+	Name:        "add",
+	Description: "(moderator only) Add a card",
 }
 
-var CommandMap map[string]func() *api.InteractionResponse
+var DelCommandData = discordgo.ApplicationCommand{
+	Name:        "del",
+	Description: "(moderator only) Delete a card",
+}
 
-func init() {
-	// Sometimes the compiler isn't smart enough to know that
-	// this function should go after main.go. If this is the case
-	// then start a new thread while we wait for it to client to be a thing.
-	if c == nil {
-		go func() {
-			for c == nil {
+var Commands = map[string]discordgo.ApplicationCommand{
+	"roll": RollCommandData,
+	"add":  AddCommandData,
+	"del":  DelCommandData,
+}
+
+var Handlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+	"roll": RandomCard,
+	"add":  AddCard,
+	"del":  DelCard,
+}
+
+// Remove the slash commands
+func RemoveSlashCommands() {
+	for _, v := range discord.State.Guilds {
+		registeredCommands, err := discord.ApplicationCommands(discord.State.User.ID, v.ID)
+		if err != nil {
+			fmt.Printf("Could not fetch registered commands: %v\n", err)
+		}
+
+		for _, n := range registeredCommands {
+			err := discord.ApplicationCommandDelete(discord.State.User.ID, v.ID, n.ID)
+			if err != nil {
+				fmt.Println(err)
 			}
-			InitFunction()
-		}()
-	} else {
-		InitFunction()
+		}
 	}
-
 }
 
-func InitFunction() {
-	CommandMap = make(map[string]func() *api.InteractionResponse)
-	CommandMap["roll"] = RandomCard
-	RefreshCommands()
-	go RefreshCommandThread()
+// Refresh the slash commands
+func RefreshSlashCommands() {
+	for _, w := range Commands {
+		_, err := discord.ApplicationCommandCreate(discord.State.User.ID, LocalConfig.GuildID, &w)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 }
-func RefreshCommandThread() {
+
+// Thread for refreshing the slash commands every minute.
+func RefreshSlashCommandsThread() {
 	ticker := time.NewTicker(30 * time.Second)
 	for {
 		select {
 		case <-ticker.C:
-			RefreshCommands()
+			RefreshSlashCommands()
 		}
 	}
-}
-
-func RefreshCommands() {
-	_, err := c.BulkOverwriteCommands(AppID, Commands)
-	if err != nil {
-		fmt.Printf("Error while refreshing commands: %v\n", err.Error())
-		os.Exit(1)
-	}
-
-}
-
-type handler struct {
-	*state.State
-}
-
-func (h handler) HandleInteraction(ev *discord.InteractionEvent) *api.InteractionResponse {
-	switch data := ev.Data.(type) {
-	case *discord.CommandInteraction:
-		cmd, ok := CommandMap[data.Name]
-		if ok {
-			return cmd()
-		}
-	}
-	return nil
 }

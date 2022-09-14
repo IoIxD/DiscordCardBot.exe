@@ -1,24 +1,22 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/diamondburned/arikawa/v3/api"
-	"github.com/diamondburned/arikawa/v3/discord"
-	"github.com/diamondburned/arikawa/v3/gateway"
+	"github.com/bwmarrin/discordgo"
 	"github.com/pelletier/go-toml/v2"
 )
 
-var c *api.Client
-var g *gateway.Gateway
-var AppID discord.AppID
+var discord *discordgo.Session
+var role *discordgo.Role
 
 var LocalConfig struct {
 	BotToken string
+	RoleID   string
+	GuildID  string
 }
 
 func main() {
@@ -35,18 +33,37 @@ func main() {
 	}
 
 	// initialize the Discord client
-	c = api.NewClient("Bot " + LocalConfig.BotToken)
-	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
-	g, err = gateway.NewWithIntents(ctx, LocalConfig.BotToken, gateway.IntentGuilds|gateway.IntentGuildMessages|gateway.IntentGuildIntegrations)
+	discord, err = discordgo.New("Bot " + LocalConfig.BotToken)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
+	discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if h, ok := Handlers[i.ApplicationCommandData().Name]; ok {
+			h(s, i)
+		}
+	})
+	discord.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+		fmt.Printf("Logged in as: %v#%v\n", s.State.User.Username, s.State.User.Discriminator)
+		// initialize slash commands
+		RefreshSlashCommands()
+
+		// initialize the verification role
+		role, err = discord.State.Role(LocalConfig.GuildID, LocalConfig.RoleID)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+	})
+
+	discord.Open()
+
+	//RefreshSlashCommandsThread()
+
 	// Signals for terminating the program
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
 	// wait for termination
 	for {
 		select {
